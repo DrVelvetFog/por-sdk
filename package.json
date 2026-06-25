@@ -1,0 +1,53 @@
+{
+  "name": "por-sdk",
+  "version": "0.8.1",
+  "description": "Proof of Real \u2014 gate any Sui app on verified-human credentials in a few lines.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "demo": "node --import tsx demo.ts"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.30.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "license": "Apache-2.0",
+  "author": "UIG Studios LLC",
+  "homepage": "https://por-proof-of-real.netlify.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DrVelvetFog/por-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DrVelvetFog/por-sdk/issues"
+  },
+  "keywords": [
+    "sui",
+    "proof-of-personhood",
+    "sybil-resistance",
+    "webauthn",
+    "credential",
+    "proof-of-real",
+    "zero-knowledge",
+    "groth16",
+    "nullifier",
+    "account-recovery"
+  ]
+}
