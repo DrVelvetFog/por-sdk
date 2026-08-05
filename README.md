@@ -6,6 +6,13 @@ Gate any Sui app on **verified-human** credentials — in a few lines.
 npm install por-sdk @mysten/sui
 ```
 
+## Try it
+
+```bash
+npm install && npm run build
+npm run demo                 # reads a real testnet credential
+```
+
 ## Off-chain gate (show/hide a claim, gate an action)
 
 Three lines:
@@ -83,11 +90,4 @@ client or addresses:
 
 ```ts
 new PorClient({ suiClient, deployment: { network, packageId, registryId } });
-```
-
-## Try it
-
-```bash
-npm install && npm run build
-npm run demo                 # reads a real testnet credential
 ```
