@@ -91,3 +91,16 @@ client or addresses:
 ```ts
 new PorClient({ suiClient, deployment: { network, packageId, registryId } });
 ```
+
+## Transport (v0.9+)
+
+Since v0.9.0 the default transport is **gRPC** (`SuiGrpcClient` from
+`@mysten/sui/grpc`, against the same `fullnode.<network>.sui.io` hosts) — Mysten
+retired the public JSON-RPC endpoints in July 2026, which broke every read in
+v0.8.x's default configuration. This also moves the peer dependency to
+`@mysten/sui` **^2.x**.
+
+An injected `suiClient` now needs the v2 core surface (`listOwnedObjects` +
+`simulateTransaction`) — any `SuiGrpcClient`, a v2 JSON-RPC client pointed at a
+provider that still serves JSON-RPC, or your own failover wrapper. A v1
+`SuiClient` no longer satisfies the type.

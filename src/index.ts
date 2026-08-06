@@ -1,4 +1,5 @@
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+import type { SuiClientTypes } from '@mysten/sui/client';
+import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
 import type { TransactionObjectArgument } from '@mysten/sui/transactions';
 import { bcs } from '@mysten/sui/bcs';
@@ -8,7 +9,7 @@ import { TESTNET, CLOCK_ID, type Deployment } from './deployment.js';
 const FR_MODULUS =
   21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
-/** Any valid address works as a devInspect sender for read-only views. */
+/** Any valid address works as a read-only-simulation sender for view calls. */
 const READ_SENDER = '0x0000000000000000000000000000000000000000000000000000000000000000';
 
 /**
@@ -346,9 +347,24 @@ export interface RecoveryAuthorization extends UniquenessAuthorization {
   strandedCredId: string;
 }
 
+/**
+ * The transport surface PorClient reads through — the two v2 core methods it
+ * uses. Satisfied by `SuiGrpcClient` (the default), the v2 JSON-RPC client, or
+ * any custom wrapper (failover, private endpoints, …).
+ */
+export type PorSuiTransport = Pick<
+  SuiClientTypes.TransportMethods,
+  'listOwnedObjects' | 'simulateTransaction'
+>;
+
 export interface PorClientOptions {
-  /** Provide your own SuiClient, or omit to use the deployment's network. */
-  suiClient?: SuiClient;
+  /**
+   * Provide your own Sui client (e.g. a `SuiGrpcClient` pointed at a private
+   * endpoint), or omit to use gRPC against the deployment network's public
+   * fullnode. Mysten retired public JSON-RPC on fullnode.*.sui.io (2026-07),
+   * so the default transport is gRPC on the same hosts.
+   */
+  suiClient?: PorSuiTransport;
   /** Override on-chain addresses. Defaults to PoR testnet. */
   deployment?: Deployment;
 }
@@ -357,6 +373,16 @@ const CRED_SUFFIX = '::credential::RealHumanCredential';
 
 function bytesToHex(bytes: number[]): string {
   return '0x' + bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Normalize a `vector<u8>` commitment field to 0x-hex. gRPC JSON renders it as
+ *  base64; a JSON-RPC-shaped client yields a number array; already-hex passes through. */
+function commitmentToHex(v: unknown): string {
+  if (Array.isArray(v)) return bytesToHex(v as number[]);
+  if (typeof v === 'string' && !v.startsWith('0x') && v !== '') {
+    try { return bytesToHex(Array.from(b64urlToBytes(v))); } catch { /* fall through */ }
+  }
+  return String(v ?? '');
 }
 
 /** One attestor URL, or an ordered list (primary first) for redundancy/failover. */
@@ -432,12 +458,40 @@ async function postToAttestor<T>(
  *     throw new Error('Not a verified human');
  */
 export class PorClient {
-  readonly client: SuiClient;
+  readonly client: PorSuiTransport;
   readonly deployment: Deployment;
 
   constructor(opts: PorClientOptions = {}) {
     this.deployment = opts.deployment ?? TESTNET;
-    this.client = opts.suiClient ?? new SuiClient({ url: getFullnodeUrl(this.deployment.network) });
+    const network = this.deployment.network;
+    this.client =
+      opts.suiClient ??
+      new SuiGrpcClient({
+        network,
+        baseUrl:
+          network === 'localnet'
+            ? 'http://127.0.0.1:9000'
+            : `https://fullnode.${network}.sui.io:443`,
+      });
+  }
+
+  /**
+   * Read-only view call: simulate `tx` (no gas, no signer — `checksEnabled:
+   * false` mirrors the old devInspect semantics) and return the first
+   * command's first BCS return value, or `undefined` when the view aborts.
+   */
+  private async simulateView(tx: Transaction): Promise<{ ok: boolean; error?: string; bytes?: Uint8Array }> {
+    tx.setSender(READ_SENDER);
+    const r = await this.client.simulateTransaction({
+      transaction: tx,
+      checksEnabled: false,
+      include: { commandResults: true },
+    });
+    const t = r.Transaction ?? r.FailedTransaction;
+    if (t?.status?.success !== true) {
+      return { ok: false, error: t?.status?.error?.message ?? 'simulation failed' };
+    }
+    return { ok: true, bytes: r.commandResults?.[0]?.returnValues?.[0]?.bcs };
   }
 
   /** The fully-qualified credential type for this deployment. */
@@ -451,27 +505,24 @@ export class PorClient {
     // minted/upgraded one). Fetch a page and return the BEST — highest level
     // among unexpired, else highest expired — so an L2 gate isn't given a false
     // negative just because an L0 happened to be read first.
-    const res = await this.client.getOwnedObjects({
+    const res = await this.client.listOwnedObjects({
       owner,
-      filter: { StructType: this.credentialType },
-      options: { showContent: true },
+      type: this.credentialType,
       limit: 50,
+      include: { json: true },
     });
     const now = Date.now();
     let best: Credential | null = null;
     let bestScore = -1;
-    for (const item of res.data) {
-      const obj = item.data;
-      if (!obj || obj.content?.dataType !== 'moveObject') continue;
-      const f = obj.content.fields as Record<string, unknown>;
+    for (const obj of res.objects) {
+      const f = obj.json as Record<string, unknown> | null;
+      if (!f) continue;
       const cred: Credential = {
         id: obj.objectId,
         level: Number(f.level) as Level,
         expiresAtMs: Number(f.expires_at_ms),
         issuedAtMs: Number(f.issued_at_ms),
-        deviceCommitment: Array.isArray(f.device_commitment)
-          ? bytesToHex(f.device_commitment as number[])
-          : String(f.device_commitment ?? ''),
+        deviceCommitment: commitmentToHex(f.device_commitment),
         attestor: String(f.attestor),
       };
       // Rank: any unexpired cred beats any expired one; within that, higher level wins.
@@ -490,9 +541,10 @@ export class PorClient {
   }
 
   /**
-   * Off-chain: has `credId` been revoked in the main Registry? Read-only devInspect
-   * of `registry::is_revoked` (no gas, no signer). Folded into {@link isVerified} by
-   * default; call directly if you track revocation on your own cadence.
+   * Off-chain: has `credId` been revoked in the main Registry? Read-only
+   * simulation of `registry::is_revoked` (no gas, no signer). Folded into
+   * {@link isVerified} by default; call directly if you track revocation on
+   * your own cadence.
    */
   async isRevoked(credId: string): Promise<boolean> {
     const tx = new Transaction();
@@ -500,12 +552,9 @@ export class PorClient {
       target: `${this.deployment.packageId}::registry::is_revoked`,
       arguments: [tx.object(this.deployment.registryId), tx.object(credId)],
     });
-    const r = await this.client.devInspectTransactionBlock({ sender: READ_SENDER, transactionBlock: tx });
-    if (r.effects?.status?.status !== 'success') {
-      throw new Error(`revocation check failed: ${r.effects?.status?.error ?? 'devInspect error'}`);
-    }
-    const rv = r.results?.[0]?.returnValues?.[0]?.[0];
-    return Array.isArray(rv) ? rv[0] === 1 : false;
+    const r = await this.simulateView(tx);
+    if (!r.ok) throw new Error(`revocation check failed: ${r.error}`);
+    return r.bytes?.[0] === 1;
   }
 
   /**
@@ -715,7 +764,8 @@ export class PorClient {
 
   /**
    * Off-chain: is `credId` backed by a one-human-one-credential proof?
-   * Reads `uniqueness::is_unique_id` via devInspect (no owned object needed).
+   * Reads `uniqueness::is_unique_id` via read-only simulation (no owned object
+   * needed).
    */
   async isUniqueCredId(credId: string): Promise<boolean> {
     const { uniquenessPackageId, uniquenessRegistryId } = this.deployment;
@@ -725,9 +775,8 @@ export class PorClient {
       target: `${uniquenessPackageId}::uniqueness::is_unique_id`,
       arguments: [tx.object(uniquenessRegistryId), tx.pure.id(credId)],
     });
-    const r = await this.client.devInspectTransactionBlock({ sender: READ_SENDER, transactionBlock: tx });
-    const rv = r.results?.[0]?.returnValues?.[0]?.[0];
-    return Array.isArray(rv) ? rv[0] === 1 : false;
+    const r = await this.simulateView(tx);
+    return r.ok && r.bytes?.[0] === 1;
   }
 
   /** Off-chain: does `owner` hold a credential backed by a uniqueness proof? */
