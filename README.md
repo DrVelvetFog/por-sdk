@@ -85,12 +85,19 @@ const cred = await por.getCredential(address);
 
 ## Config
 
-`new PorClient()` defaults to PoR's testnet deployment. Override with your own
-client or addresses:
+`new PorClient()` defaults to PoR's **testnet** deployment, where anyone can
+mint a credential for free — fine for building, not for gating real value. Pick
+the network explicitly:
 
 ```ts
-new PorClient({ suiClient, deployment: { network, packageId, registryId } });
+new PorClient({ network: 'mainnet' });            // PoR's mainnet deployment
+new PorClient({ network: 'testnet' });            // same as the default
+new PorClient({ suiClient, deployment: { network, packageId, registryId } }); // your own
 ```
+
+Since v0.9.1 the constructor throws on an unknown option, an unknown network, or a
+`network` that conflicts with `deployment.network`. Earlier versions silently
+ignored unknown keys, so `new PorClient({ network: 'mainnet' })` read **testnet**.
 
 ## Transport (v0.9+)
 

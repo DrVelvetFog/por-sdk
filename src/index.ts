@@ -3,7 +3,7 @@ import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
 import type { TransactionObjectArgument } from '@mysten/sui/transactions';
 import { bcs } from '@mysten/sui/bcs';
-import { TESTNET, CLOCK_ID, type Deployment } from './deployment.js';
+import { TESTNET, MAINNET, CLOCK_ID, type Deployment } from './deployment.js';
 
 /** BN254 scalar-field modulus (used to reduce an address to the bound signal). */
 const FR_MODULUS =
@@ -367,6 +367,32 @@ export interface PorClientOptions {
   suiClient?: PorSuiTransport;
   /** Override on-chain addresses. Defaults to PoR testnet. */
   deployment?: Deployment;
+  /**
+   * Shorthand for PoR's own deployments: `'mainnet'` = `MAINNET`, `'testnet'` =
+   * `TESTNET`. If you also pass `deployment`, its `network` must match.
+   */
+  network?: 'testnet' | 'mainnet';
+}
+
+const KNOWN_OPTIONS = new Set(['suiClient', 'deployment', 'network']);
+const BY_NETWORK: Record<string, Deployment> = { testnet: TESTNET, mainnet: MAINNET };
+
+/** Resolve the deployment, refusing anything ambiguous. A silently-ignored option
+ *  here means gating on the wrong chain (testnet credentials are free to mint), so
+ *  unknown keys, unknown networks and conflicting settings all throw. */
+function resolveDeployment(opts: PorClientOptions): Deployment {
+  for (const k of Object.keys(opts)) {
+    if (!KNOWN_OPTIONS.has(k)) {
+      throw new Error(`PorClient: unknown option "${k}" — expected suiClient, deployment or network`);
+    }
+  }
+  if (opts.network === undefined) return opts.deployment ?? TESTNET;
+  const byNet = BY_NETWORK[opts.network];
+  if (!byNet) throw new Error(`PorClient: unknown network "${String(opts.network)}" — use 'testnet' or 'mainnet'`);
+  if (opts.deployment && opts.deployment.network !== opts.network) {
+    throw new Error(`PorClient: network "${opts.network}" conflicts with deployment.network "${opts.deployment.network}"`);
+  }
+  return opts.deployment ?? byNet;
 }
 
 const CRED_SUFFIX = '::credential::RealHumanCredential';
@@ -462,7 +488,7 @@ export class PorClient {
   readonly deployment: Deployment;
 
   constructor(opts: PorClientOptions = {}) {
-    this.deployment = opts.deployment ?? TESTNET;
+    this.deployment = resolveDeployment(opts ?? {});
     const network = this.deployment.network;
     this.client =
       opts.suiClient ??
