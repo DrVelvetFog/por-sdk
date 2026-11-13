@@ -99,6 +99,18 @@ Since v0.9.1 the constructor throws on an unknown option, an unknown network, or
 `network` that conflicts with `deployment.network`. Earlier versions silently
 ignored unknown keys, so `new PorClient({ network: 'mainnet' })` read **testnet**.
 
+## Revoking your own credential (v0.9.2+, testnet)
+
+A holder can revoke their own credential — permanent, and the device slot is not freed:
+
+```ts
+const tx = new Transaction();
+por.buildRevokeOwnTx(tx, credId);   // registry::revoke_own, package v9+
+// the holder's wallet signs and executes tx
+```
+
+Not on mainnet yet (mainnet is still package v1); it throws there.
+
 ## Transport (v0.9+)
 
 Since v0.9.0 the default transport is **gRPC** (`SuiGrpcClient` from
