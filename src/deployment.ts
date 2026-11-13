@@ -21,6 +21,9 @@ export interface Deployment {
    *  L2 / uniqueness paths. The quorum id is also returned on the attestor authorization. */
   actionQuorumId?: string;
   uniquenessQuorumId?: string;
+  /** Newest package version. Functions added by later upgrades (e.g. `registry::revoke_own`,
+   *  v9) only exist there — calling an older package id runs that version's code. */
+  latestPackageId?: string;
 }
 
 export const TESTNET: Deployment = {
@@ -35,6 +38,7 @@ export const TESTNET: Deployment = {
   porContext: '5892269913328866253268307249312928604523378311602329750868675706200992307667',
   actionQuorumId: '0x7291bf44d6abe68fad18ba75fecf94360aa822b6da1663493d03472f232d7221',
   uniquenessQuorumId: '0x7291bf44d6abe68fad18ba75fecf94360aa822b6da1663493d03472f232d7221',
+  latestPackageId: '0x9e7dfc5509513811e3a2b39a6bbb04650e7b82eff0d0b2a767ecf1dd4cb49ab4',
 };
 
 export const MAINNET: Deployment = {

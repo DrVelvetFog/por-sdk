@@ -38,3 +38,17 @@ test('unknown network throws', () => {
 test('unknown option throws instead of being ignored', () => {
   assert.throws(() => new PorClient({ chain: 'mainnet' }), /unknown option "chain"/);
 });
+
+test('buildRevokeOwnTx targets the latest package with registry + credential', async () => {
+  const { Transaction } = await import('@mysten/sui/transactions');
+  const tx = new Transaction();
+  new PorClient().buildRevokeOwnTx(tx, '0x' + '11'.repeat(32));
+  const call = tx.getData().commands[0].MoveCall;
+  assert.equal(`${call.package}::${call.module}::${call.function}`, `${TESTNET.latestPackageId}::registry::revoke_own`);
+  assert.equal(call.arguments.length, 2);
+});
+
+test('buildRevokeOwnTx refuses a deployment without latestPackageId (mainnet today)', async () => {
+  const { Transaction } = await import('@mysten/sui/transactions');
+  assert.throws(() => new PorClient({ network: 'mainnet' }).buildRevokeOwnTx(new Transaction(), '0x' + '11'.repeat(32)), /latestPackageId/);
+});

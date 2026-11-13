@@ -690,6 +690,20 @@ export class PorClient {
    * If `auth.recover` is set, routes to `buildRecoverRealActionTx` instead — the
    * device nullifier is already bound to a stranded credential, so this rebinds.
    */
+  /**
+   * Holder self-revocation: adds `registry::revoke_own` to `tx`. The holder signs (only
+   * the owner can pass their credential). Permanent; the device slot is not freed.
+   * Needs a deployment with `latestPackageId` (testnet v9+; not yet on mainnet).
+   */
+  buildRevokeOwnTx(tx: Transaction, credId: string): void {
+    const pkg = this.deployment.latestPackageId;
+    if (!pkg) throw new Error('this deployment has no latestPackageId — self-revocation needs PoR package v9+');
+    tx.moveCall({
+      target: `${pkg}::registry::revoke_own`,
+      arguments: [tx.object(this.deployment.registryId), tx.object(credId)],
+    });
+  }
+
   buildRealActionUpgradeTx(tx: Transaction, auth: RealActionAuthorization): void {
     if (auth.recover) {
       this.buildRecoverRealActionTx(tx, auth);
